@@ -8,7 +8,7 @@ import torch
 SEED = 42
 
 # Early stopping
-EARLY_STOPPING_PATIENCE = 10
+EARLY_STOPPING_PATIENCE = 15
 
 # Input tensor shape
 MSA_LENGTH = 1380      # fixed length of the multiple sequence alignment

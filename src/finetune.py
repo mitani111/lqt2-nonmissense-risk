@@ -38,7 +38,7 @@ def parse_args():
     p.add_argument("--split", choices=sorted(SPLITS), default="holdout")
     p.add_argument("--alphaZ", type=float, default=1.0, help="coefficient of the KL term")
     p.add_argument("--betaZ", type=float, default=1.0, help="coefficient of the survival term")
-    p.add_argument("--pretrain-epoch", type=int, default=260,
+    p.add_argument("--pretrain-epoch", type=int, default=200,
                    help="pre-training checkpoint to start from")
     p.add_argument("--data-root", default=None)
     p.add_argument("--out-root", default=None)
@@ -177,8 +177,6 @@ def main():
     val_cindex_epoch = []
 
     for epoch in range(N_EPOCHS + 1):
-        if epoch % SAVE_EVERY == 0:
-            save_checkpoint(epoch)
 
         batch_loss, batch_KLz, batch_CExz, batch_CEyz = [], [], [], []
 
@@ -224,6 +222,8 @@ def main():
 
         if val_loader is not None:
             val_cindex_epoch.append(evaluate_val_cindex(val_loader))
+        if epoch % SAVE_EVERY == 0:
+            save_checkpoint(epoch)
 
     # ---------------- outputs -------------------------------------------
     loss_path = reset_dir(os.path.join(save_path, "loss"))

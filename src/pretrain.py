@@ -96,8 +96,6 @@ def main():
     loss_all, KLz_all, CExz_all = [], [], []
 
     for epoch in range(n_epochs):
-        if epoch % SAVE_EVERY == 0:
-            save_checkpoint(epoch)
 
         for arrays, labels in data_loader:
             arrays = arrays.float().to(device)
@@ -145,7 +143,8 @@ def main():
                          ("CExz_epoch", CExz_epoch), ("loss_all", loss_all),
                          ("KLz_all", KLz_all), ("CExz_all", CExz_all)]:
         np.save(os.path.join(loss_path, name), np.array(values))
-
+    if epoch % SAVE_EVERY == 0:
+            save_checkpoint(epoch)
 
 if __name__ == "__main__":
     main()

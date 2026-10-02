@@ -33,7 +33,7 @@ survival term as **lambda**. The command-line flags predate that notation:
 | lambda | `--betaZ` | Cox partial-likelihood term, fine-tuning only |
 
 Run directories are named from these values with the decimal point removed,
-so `--alphaZ 0.2 --betaZ 50.0` gives `finetune_z02_500/`.
+so `--alphaZ 1.0 --betaZ 10.0` gives `finetune_z10_100/`.
 
 ---
 
@@ -105,14 +105,14 @@ fine-tuning run with a given beta starts from the pretraining run with that
 same beta.
 
 ```
-beta   in {0.2, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0}     (--alphaZ)
-lambda in {0.1, 0.5, 1.0, 10.0, 50.0, 100.0}       (--betaZ)
+beta   in {0.001, 0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 100.0}     (--alphaZ)
+lambda in {0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 100.0}       (--betaZ)
 ```
 
-42 configurations tuned by grid search with 3-fold cross-validation in the
+56 configurations tuned by grid search with 3-fold cross-validation in the
 training set. The validation C-index is computed at every epoch on each
 fold and the mean C-index across folds is monitored with early stopping
-after **10 epochs without improvement**; the configuration with the highest
+after **15 epochs without improvement**; the configuration with the highest
 mean validation C-index is selected.
 
 ---
@@ -140,3 +140,49 @@ is reported with **Wilson 95% confidence intervals**, and domain-specific
 p-values are calculated with a **chi-square test** per domain (a 2 x k table of
 that domain against the remaining domains). Benjamini-Hochberg adjusted values
 are written to the output table as well, for reference.
+
+---
+
+## Reproducing the analysis
+
+```bash
+export LQT2_DATA_ROOT=/path/to/data
+export LQT2_OUT_ROOT=/path/to/runs
+
+# 1. pretraining, one run per beta
+for a in 0.001, ... , 10.0; do
+  python src/pretrain.py --alphaZ $a
+done
+
+# 2. hyperparameter grid search (42 configurations x 3 folds)
+for a in 0.001, ... , 10.0; do
+  for b in 0.01, ... 10.0; do
+    for s in cv1 cv2 cv3; do
+      python src/finetune.py --split $s --alphaZ $a --betaZ $b
+    done
+  done
+done
+python src/select_hyperparams.py
+
+# 3. final model and holdout evaluation (selected configuration)
+python src/finetune.py --split holdout --alphaZ 0.1 --betaZ 10.0
+python src/infer.py     --split holdout --alphaZ 0.1 --betaZ 10.0
+python src/evaluate_holdout.py --alphaZ 0.1 --betaZ 10.0 --epoch <selected epoch>
+
+# 4. latent space before fine-tuning
+python src/infer.py --stage pretrain --alphaZ 0.1 --pretrain-epoch 200
+python src/latent_analysis.py \
+  --table $LQT2_OUT_ROOT/pretrain_z01/validation/df_epoch200.csv \
+  --fig-dir $LQT2_OUT_ROOT/pretrain_z01/figures
+
+# 5. latent space after fine-tuning (model refit on the full clinical cohort)
+python src/finetune.py --split full --alphaZ 0.1 --betaZ 10.0
+python src/infer.py    --split full --alphaZ 0.1 --betaZ 10.0
+python src/latent_analysis.py --alphaZ 0.1 --betaZ 10.0
+python src/domain_analysis.py \
+  --clusters-csv $LQT2_OUT_ROOT/finetune_z01_100/full/latent_clusters_epoch*.csv
+```
+
+## License
+
+[MIT](LICENSE)

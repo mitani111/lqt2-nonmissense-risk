@@ -9,8 +9,8 @@ import pandas as pd
 
 from config import EARLY_STOPPING_PATIENCE, early_stop, out_root, tag
 
-ALPHA_GRID = [0.2, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0]
-BETA_GRID = [0.1, 0.5, 1.0, 10.0, 50.0, 100.0]
+ALPHA_GRID = [0.001, 0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 100.0]
+BETA_GRID = [0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 100.0]
 CV_SPLITS = ["cv1", "cv2", "cv3"]
 
 

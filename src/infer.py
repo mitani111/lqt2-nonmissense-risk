@@ -21,7 +21,7 @@ def parse_args():
     p.add_argument("--betaZ", type=float, default=1.0)
     p.add_argument("--epochs", type=int, default=151,
                    help="number of fine-tuning checkpoints to score (0 .. epochs-1)")
-    p.add_argument("--pretrain-epoch", type=int, default=260,
+    p.add_argument("--pretrain-epoch", type=int, default=200,
                    help="checkpoint to score when --stage pretrain")
     p.add_argument("--data-root", default=None)
     p.add_argument("--out-root", default=None)

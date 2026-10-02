@@ -78,25 +78,24 @@ class Encoder_last(nn.Module):
 
 
 class DecoderCategorical(nn.Module):
-    def __init__(self, input_dim, seq_length=MSA_LENGTH,
-                 num_aa_types=N_AA_CLASSES):
+    def __init__(self, batch_size, input_dim=100, hidden_dims=(256, 512, 1024), rank=128, seq_length=1380, num_aa_types=21):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, 1000)
-        self.fc2 = nn.Linear(1000, 8000)
-        self.fc3 = nn.Linear(8000, 20000)
-        self.fc4 = nn.Linear(20000, seq_length * num_aa_types)
-
-        self.seq_length = seq_length
-        self.num_aa_types = num_aa_types
-        self.softplus = nn.Softplus()
-
+        h1, h2, h3 = hidden_dims
+        self.fc1 = nn.Linear(input_dim, h1)
+        self.fc2 = nn.Linear(h1, h2)
+        self.fc3 = nn.Linear(h2, h3)
+        self.down = nn.Linear(h3, rank)
+        self.up = nn.Linear(rank, seq_length * num_aa_types)
+        self.seq_length, self.num_aa_types = seq_length, num_aa_types
+        self.batch_size = batch_size
+        self.act = nn.Softplus()
+ 
     def forward(self, x):
-        x = self.softplus(self.fc1(x))
-        x = self.softplus(self.fc2(x))
-        x = self.softplus(self.fc3(x))
-        x = self.softplus(self.fc4(x))
-        x = x.view(-1, self.num_aa_types, self.seq_length)
-        return torch.softmax(x, dim=-1)
+        x = self.act(self.fc1(x))
+        x = self.act(self.fc2(x))
+        x = self.act(self.fc3(x))
+        x = self.up(self.down(x))
+        return x.view(-1, self.num_aa_types, self.seq_length)
 
 class Pyz(nn.Module):
     def __init__(self, input_dim, n_covariates=2):
