@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import torch
@@ -6,6 +7,9 @@ import torch.distributions as dist
 from torch.utils.data import Dataset
 
 from config import MSA_LENGTH, N_AA_CLASSES
+
+def array_files(directory):
+    return sorted(f for f in os.listdir(directory) if f.endswith(".npy"))
 
 class AminoDataset(Dataset):
     def __init__(self, file_list, dir_, df_path, label_dir,
@@ -78,7 +82,7 @@ class Encoder_last(nn.Module):
 
 
 class DecoderCategorical(nn.Module):
-    def __init__(self, batch_size, input_dim=100, hidden_dims=(256, 512, 1024), rank=128, seq_length=1380, num_aa_types=21):
+    def __init__(self, input_dim=100, hidden_dims=(256, 512, 1024), rank=128, seq_length=1380, num_aa_types=21):
         super().__init__()
         h1, h2, h3 = hidden_dims
         self.fc1 = nn.Linear(input_dim, h1)
@@ -87,7 +91,6 @@ class DecoderCategorical(nn.Module):
         self.down = nn.Linear(h3, rank)
         self.up = nn.Linear(rank, seq_length * num_aa_types)
         self.seq_length, self.num_aa_types = seq_length, num_aa_types
-        self.batch_size = batch_size
         self.act = nn.Softplus()
  
     def forward(self, x):

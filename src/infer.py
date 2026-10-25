@@ -28,7 +28,7 @@ def parse_args():
     p.add_argument("--tensor-dir", default=None)
     p.add_argument("--meta-csv", default=None,
                    help="metadata table including the split assignment "
-                        "(default <data-root>/in_data/metadata_with_split.csv)")
+                        "(default <data-root>/in_data/metadata.csv)")
     p.add_argument("--device", default="auto")
     return p.parse_args()
 
@@ -74,7 +74,7 @@ def main():
     oroot = out_root(args.out_root)
     tensor_dir = args.tensor_dir or os.path.join(droot, "tensors")
     meta_csv = args.meta_csv or os.path.join(droot, "in_data",
-                                             "metadata_with_split.csv")
+                                             "metadata.csv")
     if args.stage == "pretrain":
         run_path = os.path.join(oroot, f"pretrain_z{tag(args.alphaZ)}")
         epochs = [args.pretrain_epoch]

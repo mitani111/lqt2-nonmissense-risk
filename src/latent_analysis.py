@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from lifelines import KaplanMeierFitter
-from lifelines.statistics import multivariate_logrank_test
-from sklearn.cluster import KMeans
+from lifelines.statistics import multivariate_logrank_test, pairwise_logrank_test
+from sklearn.mixture import GaussianMixture
 from sklearn.manifold import TSNE
 
 from config import (CLINICAL_ID_MAX, EARLY_STOPPING_PATIENCE, LATENT_DIM,
@@ -19,7 +19,9 @@ from config import (CLINICAL_ID_MAX, EARLY_STOPPING_PATIENCE, LATENT_DIM,
 matplotlib.use("Agg")
 
 TSNE_PERPLEXITY = 5
-ELBOW_MAX_K = 14
+GMM_N_INIT = 5
+COVARIANCE_TYPE = "full"
+MISSENSE_LABEL = "Missense (reference)"
 
 
 def parse_args():
@@ -33,7 +35,7 @@ def parse_args():
     p.add_argument("--table", default=None,
                    help="analyse this exported table instead of resolving a run directory")
     p.add_argument("--patience", type=int, default=EARLY_STOPPING_PATIENCE,
-                   help="epochs without improvement in KLz before stopping")
+                   help="epochs without improvement")
     p.add_argument("--n-clusters", type=int, default=2)
     p.add_argument("--missense-ids", default="",
                    help="comma-separated record IDs that carry several missense "
@@ -43,10 +45,10 @@ def parse_args():
     return p.parse_args()
 
 
-def select_epoch_from_klz(loss_dir, patience=EARLY_STOPPING_PATIENCE):
-    klz = np.load(os.path.join(loss_dir, "KLz_epoch.npy"))
-    _, epoch = early_stop(klz, patience)
-    return int(epoch), klz
+def select_epoch_from_loss(loss_dir, patience=EARLY_STOPPING_PATIENCE):
+    curve = np.load(os.path.join(loss_dir, "loss_epoch.npy"))
+    _, epoch = early_stop(-curve, patience)
+    return int(epoch), curve
 
 
 def annotate_variants(df, missense_ids):
@@ -60,48 +62,25 @@ def annotate_variants(df, missense_ids):
     df["distance_msa"] = [Levenshtein.distance(ctrl_msa, str(s)) for s in df["MSA"]]
     df["distance_orig"] = [Levenshtein.distance(ctrl_seq, str(s)) for s in df["sequence"]]
 
-    labels = []
-    for d in df["distance_orig"]:
-        if d == 0:
-            labels.append("reference")
-        elif d == 1:
-            labels.append("missense")
-        else:
-            labels.append("non-missense")
-    df["MutationType"] = labels
+    df["MutationType"] = df["VariantType"]
     if missense_ids:
         df.loc[df["ID"].isin(missense_ids), "MutationType"] = "missense"
     df["ctrl_msa"] = ctrl_msa
     return df
 
 
-def name_clusters(df):
-    """Name the clusters A, B, ... in decreasing order of missense content.
-
-    In the study all missense variants fell into a single cluster, which the
-    article calls Cluster A; k-means itself returns arbitrary integer labels.
-    """
-    missense_per_cluster = (df.assign(is_missense=df["MutationType"].eq("missense"))
-                              .groupby("cluster")["is_missense"].sum()
-                              .sort_values(ascending=False))
-    mapping = {cluster: string.ascii_uppercase[i]
-               for i, cluster in enumerate(missense_per_cluster.index)}
-    return df["cluster"].map(mapping)
+def name_clusters(labels, risk=None):
+    if risk is None:
+        order = sorted({int(l) for l in labels})
+    else:
+        order = (pd.Series(np.asarray(risk)).groupby(labels).mean()
+                 .sort_values(ascending=False).index)
+    mapping = {int(c): string.ascii_uppercase[i] for i, c in enumerate(order)}
+    return np.array([mapping[int(l)] for l in labels])
 
 
-def elbow_plot(features, fig_path, max_k=ELBOW_MAX_K):
-    distortions = []
-    for k in range(1, max_k + 1):
-        km = KMeans(n_clusters=k, init="k-means++", n_init=10,
-                    max_iter=300, random_state=SEED).fit(features)
-        distortions.append(km.inertia_)
-    fig, ax = plt.subplots(figsize=(5, 4))
-    ax.plot(range(1, max_k + 1), distortions, marker="o")
-    ax.set_xlabel("Number of clusters")
-    ax.set_ylabel("Distortion")
-    fig.tight_layout()
-    fig.savefig(fig_path, dpi=300)
-    plt.close(fig)
+def display_name(value):
+    return value if value == MISSENSE_LABEL else f"Cluster {value}"
 
 
 def scatter(embedding, values, label, fig_path, discrete=False):
@@ -110,7 +89,7 @@ def scatter(embedding, values, label, fig_path, discrete=False):
         for value in sorted(pd.unique(values)):
             mask = np.asarray(values) == value
             ax.scatter(embedding[mask, 0], embedding[mask, 1], s=11, alpha=0.85,
-                       linewidths=0, rasterized=True, label=f"{label} {value}")
+                       linewidths=0, rasterized=True, label=display_name(value))
         ax.legend(frameon=False, markerscale=2.0)
     else:
         sc = ax.scatter(embedding[:, 0], embedding[:, 1], c=values, cmap="plasma",
@@ -135,7 +114,7 @@ def km_by_cluster(df_clinical, fig_path, title):
     fig, ax = plt.subplots(figsize=(6.5, 5.0))
     for cluster, group in df_clinical.groupby("cluster_label"):
         kmf = KaplanMeierFitter()
-        kmf.fit(group["age"], group["event"], label=f"Cluster {cluster}")
+        kmf.fit(group["age"], group["event"], label=display_name(cluster))
         kmf.plot(ax=ax, show_censors=True, ci_show=False)
     result = multivariate_logrank_test(df_clinical["age"],
                                        df_clinical["cluster_label"],
@@ -166,7 +145,7 @@ def resolve_table(args):
                             args.split)
     epoch = args.epoch
     if epoch is None:
-        epoch, _ = select_epoch_from_klz(os.path.join(run_path, "loss"),
+        epoch, _ = select_epoch_from_loss(os.path.join(run_path, "loss"),
                                          args.patience)
         print(f"Analysis epoch from the KLz curve: {epoch}")
     return os.path.join(run_path, "validation", f"df_epoch{epoch}.csv"), epoch, run_path
@@ -178,22 +157,20 @@ def main():
     fig_dir = args.fig_dir or os.path.join(run_path, "figures")
     os.makedirs(fig_dir, exist_ok=True)
 
-    # ---------------- 1. the KLz curve behind the chosen epoch ------------
     loss_dir = os.path.join(run_path, "loss")
-    if args.table is None and os.path.exists(os.path.join(loss_dir, "KLz_epoch.npy")):
-        klz = np.load(os.path.join(loss_dir, "KLz_epoch.npy"))
+    if args.table is None and os.path.exists(os.path.join(loss_dir, "loss_epoch.npy")):
+        curve = np.load(os.path.join(loss_dir, "loss_epoch.npy"))
         fig, ax = plt.subplots(figsize=(6, 5))
-        ax.plot(klz)
+        ax.plot(curve)
         ax.axvline(epoch, linestyle="--", color="red", alpha=0.8,
                    label=f"selected epoch = {epoch}")
         ax.set_xlabel("epoch")
-        ax.set_ylabel("KLz")
+        ax.set_ylabel("$L_{finetune}$")
         ax.legend(frameon=False)
         fig.tight_layout()
-        fig.savefig(os.path.join(fig_dir, "klz_early_stopping.png"), dpi=300)
+        fig.savefig(os.path.join(fig_dir, "loss_early_stopping.png"), dpi=300)
         plt.close(fig)
 
-    # ---------------- 2. latent codes ------------------------------------
     df = pd.read_csv(table_path)
     missense_ids = [int(x) for x in args.missense_ids.split(",") if x.strip()]
     df = annotate_variants(df, missense_ids)
@@ -204,14 +181,23 @@ def main():
     feature_cols = [f"feature{i}" for i in range(LATENT_DIM)]
     features = df_variant[feature_cols].to_numpy()
 
-    # ---------------- 3-4. clustering ------------------------------------
-    elbow_plot(features, os.path.join(fig_dir, "kmeans_elbow.png"))
-    km = KMeans(n_clusters=args.n_clusters, init="k-means++",
-                random_state=SEED).fit(features)
-    df_variant["cluster"] = km.labels_
-    df_variant["cluster_label"] = name_clusters(df_variant)
+    is_nm = (df_variant["MutationType"] == "non-missense").to_numpy()
+    is_ms = (df_variant["MutationType"] == "missense").to_numpy()
+    features_nm = features[is_nm]
 
-    # ---------------- 5. projection and survival -------------------------
+    gmm = GaussianMixture(n_components=args.n_clusters,
+                          covariance_type=COVARIANCE_TYPE,
+                          n_init=GMM_N_INIT, random_state=SEED)
+    labels = gmm.fit_predict(features_nm)
+
+    risk = (df_variant.loc[is_nm, "hz_hat"].to_numpy()
+            if "hz_hat" in df_variant.columns else None)
+
+    df_variant["cluster"] = pd.array([pd.NA] * len(df_variant), dtype="Int64")
+    df_variant.loc[is_nm, "cluster"] = labels
+    df_variant["cluster_label"] = np.where(is_ms, MISSENSE_LABEL, "unclustered")
+    df_variant.loc[is_nm, "cluster_label"] = name_clusters(labels, risk)
+
     embedding = TSNE(n_components=2, perplexity=TSNE_PERPLEXITY,
                      learning_rate="auto", init="pca",
                      early_exaggeration=12.0,
@@ -228,12 +214,14 @@ def main():
                 os.path.join(fig_dir, "tsne_risk.png"))
 
     clinical = df_variant[df_variant["ID"] <= CLINICAL_ID_MAX].reset_index(drop=True)
-    overall = km_by_cluster(clinical, os.path.join(fig_dir, "km_cluster_all.png"),
-                            "All variants")
     non_missense = clinical[clinical["MutationType"] == "non-missense"]
     restricted = km_by_cluster(non_missense,
                                os.path.join(fig_dir, "km_cluster_nonmissense.png"),
-                               "Non-missense variants")
+                               "Non-missense clusters")
+    overall = km_by_cluster(
+        clinical[clinical["MutationType"].isin(["non-missense", "missense"])],
+        os.path.join(fig_dir, "km_cluster_with_missense.png"),
+        "Non-missense clusters and missense reference")
 
     keep = ["ID", "age", "event", "male", "female", "MSA", "sequence", "ctrl_msa",
             "distance_orig", "distance_msa", "MutationType",
@@ -245,7 +233,8 @@ def main():
 
     print(f"epoch            : {epoch}")
     print(f"clusters         : {args.n_clusters}")
-    for name, res in (("all variants", overall), ("non-missense only", restricted)):
+    for name, res in (("non-missense clusters", restricted),
+                      ("clusters vs missense reference", overall)):
         if res is not None:
             print(f"log-rank p ({name}) : {res.p_value:.4g}")
     print(f"per-record table : {out_csv}")

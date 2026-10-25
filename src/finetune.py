@@ -10,18 +10,18 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from sksurv.metrics import concordance_index_censored as c_index
 
-from config import (BRANCH_DIMS, LATENT_DIM, N_DESCRIPTORS, TRUNK_DIMS,
-                    data_root, out_root, reset_dir, resolve_device, set_seed,
-                    tag)
+from config import (BRANCH_DIMS, EPS_STD, LATENT_DIM, N_DESCRIPTORS,
+                    TRUNK_DIMS, data_root, out_root, reset_dir,
+                    resolve_device, set_seed, tag)
 from models import (AminoDataset, CalcPartialLikelihood, DecoderCategorical,
-                    Encoder, Encoder_last, Pyz, make_bool,
+                    Encoder, Encoder_last, Pyz, array_files, make_bool,
                     standard_normal_prior)
 
 
 BATCH_SIZE = 24
 LR_ENCODER = 2e-4          # branch encoders, trunk encoder and decoder
 LR_SURVIVAL_HEAD = 4e-3    # DeepSurv head
-N_EPOCHS = 150
+N_EPOCHS = 151
 SAVE_EVERY = 1
 
 SPLITS = {
@@ -133,9 +133,7 @@ def main():
         x = encoder_2(x)
         x = encoder_3(x)
         x_mu, x_std = encoder_4(x)
-
-        avoid_inf = torch.ones_like(x_std) * 1.0e-15
-        q_z = dist.Normal(x_mu, x_std + avoid_inf, validate_args=False)
+        q_z = dist.Normal(x_mu, x_std + EPS_STD, validate_args=False)
         z = q_z.rsample() if sample_latent else x_mu
 
         x_hat = decoder(z)
@@ -179,24 +177,18 @@ def main():
     for epoch in range(N_EPOCHS + 1):
 
         batch_loss, batch_KLz, batch_CExz, batch_CEyz = [], [], [], []
-
+        for m in modules:
+            m.train()
         for arrays, label, (event, age), (male, female) in data_loader:
-            for m in modules:
-                m.train()
-
-            # a batch without any observed event carries no partial likelihood
             if event.sum().item() == 0:
                 continue
-
             arrays = arrays.float().to(device)
             for opt in optimizers:
                 opt.zero_grad()
-
             risk, x_hat, q_z = forward_to_risk(arrays,
                                                male.float().to(device),
                                                female.float().to(device),
                                                sample_latent=True)
-
             CEyz = CalcPartialLikelihood(risk, make_bool(event), age.squeeze())
             CExz = recon_loss(x_hat, label.to(device))
             KLz = dist.kl_divergence(q_z, prior).sum(2).mean()
@@ -214,7 +206,6 @@ def main():
             batch_CExz.append(CExz.item())
             batch_CEyz.append(CEyz.item())
 
-        # per-epoch values are means over batches, not the last batch
         history["loss_epoch"].append(np.mean(batch_loss))
         history["KLz_epoch"].append(np.mean(batch_KLz))
         history["CExz_epoch"].append(np.mean(batch_CExz))

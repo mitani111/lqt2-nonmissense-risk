@@ -7,13 +7,11 @@ import torch
 # Reproducibility
 SEED = 42
 
-# Early stopping
 EARLY_STOPPING_PATIENCE = 15
-
-# Input tensor shape
-MSA_LENGTH = 1380      # fixed length of the multiple sequence alignment
-N_DESCRIPTORS = 8      # AAindex descriptors per residue (see README)
-N_AA_CLASSES = 21      # 20 amino acids + alignment gap
+EPS_STD = 1e-9
+MSA_LENGTH = 1380
+N_DESCRIPTORS = 8
+N_AA_CLASSES = 21
 
 # Network widths (identical in the pre-training and fine-tuning stages)
 BRANCH_DIMS = [MSA_LENGTH, 800]                       # per-descriptor branch
@@ -47,14 +45,10 @@ DOMAIN_BOUNDS_MSA = {
 }
 
 # Record-ID convention used throughout the pipeline
-CLINICAL_ID_MAX = 999      # ID  <  999   : clinical cohort (with outcome)
+CLINICAL_ID_MAX = 999      # ID <= 999    : clinical cohort (with outcome)
 PUBLIC_ID_MIN = 10000      # ID  > 9999   : public variant records
                            # 1000 <= ID <= 9999 : reference (control) sequence
 
-
-# --------------------------------------------------------------------------
-# Helpers
-# --------------------------------------------------------------------------
 def data_root(cli_value=None):
     root = cli_value or os.environ.get("LQT2_DATA_ROOT")
     return os.path.abspath(os.path.expanduser(root))

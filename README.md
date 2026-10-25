@@ -138,9 +138,7 @@ first altered position, not the extent of the alteration.
 Among non-missense variants, the composition of the clusters within each domain
 is reported with **Wilson 95% confidence intervals**, and domain-specific
 p-values are calculated with a **chi-square test** per domain (a 2 x k table of
-that domain against the remaining domains). Benjamini-Hochberg adjusted values
-are written to the output table as well, for reference.
-
+that domain against the remaining domains).
 ---
 
 ## Reproducing the analysis
@@ -154,7 +152,7 @@ for a in 0.001, ... , 10.0; do
   python src/pretrain.py --alphaZ $a
 done
 
-# 2. hyperparameter grid search (42 configurations x 3 folds)
+# 2. hyperparameter grid search
 for a in 0.001, ... , 10.0; do
   for b in 0.01, ... 10.0; do
     for s in cv1 cv2 cv3; do

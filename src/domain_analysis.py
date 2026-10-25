@@ -5,8 +5,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import chi2_contingency
-from statsmodels.stats.multitest import multipletests
+from scipy.stats import chi2_contingency, fisher_exact
 from statsmodels.stats.proportion import proportion_confint
 
 from config import DOMAIN_BOUNDS_MSA, DOMAIN_LABELS
@@ -44,7 +43,7 @@ def stars(p_value):
         return "**"
     if p_value < 0.05:
         return "*"
-    return ""
+    return "n.s."
 
 
 def composition_figure(prop, low, high, table, clusters, fig_path):
@@ -54,7 +53,8 @@ def composition_figure(prop, low, high, table, clusters, fig_path):
 
     for i, cluster in enumerate(clusters):
         y = prop[cluster].values
-        yerr = np.vstack([y - low[cluster].values, high[cluster].values - y])
+        yerr = np.clip(np.vstack([y - low[cluster].values,
+                                  high[cluster].values - y]), 0.0, None)
         ax.bar(x + (i - (len(clusters) - 1) / 2) * width, y, width,
                yerr=yerr, capsize=3, label=f"Cluster {cluster}")
 
@@ -67,7 +67,7 @@ def composition_figure(prop, low, high, table, clusters, fig_path):
     ax.set_xticks(x)
     ax.set_xticklabels(DOMAIN_LABELS, rotation=20)
     ax.set_xlabel("Protein domain")
-    ax.set_ylabel("Within-cluster composition (%)")
+    ax.set_ylabel("Cluster proportion within region (%)")
     ax.legend(frameon=False)
     ax.grid(False)
     for side in ("top", "right"):
@@ -84,14 +84,9 @@ def main():
     os.makedirs(fig_dir, exist_ok=True)
 
     cluster_col = "cluster_label" if "cluster_label" in df.columns else "cluster"
-
-    # ---------------- domain assignment ----------------------------------
-    df["mutation_point"] = [first_divergence(str(c), str(m))
+    df["mutation_point"] = [first_divergence(str(c), str(m)) + 1
                             for c, m in zip(df["ctrl_msa"], df["MSA"])]
-    df = df[df["mutation_point"] >= 0].reset_index(drop=True)
-    # alignment positions are reported 1-based
-    df["domain"] = [assign_domain(p + 1) for p in df["mutation_point"]]
-
+    df["domain"] = [assign_domain(p) for p in df["mutation_point"]]
     non_missense = df[df["MutationType"] == "non-missense"].reset_index(drop=True)
     clusters = sorted(non_missense[cluster_col].unique())
 
@@ -101,24 +96,33 @@ def main():
               .reindex(DOMAIN_LABELS, fill_value=0)
               .reindex(columns=clusters, fill_value=0))
 
-    totals = counts.sum(axis=0)
-    prop = counts.divide(totals, axis=1) * 100
+    totals = counts.sum(axis=1)
+    prop = (counts.divide(totals, axis=0) * 100).fillna(0.0)
     low, high = prop.copy(), prop.copy()
-    for cluster in clusters:
-        if totals[cluster] > 0:
-            lo, hi = proportion_confint(count=counts[cluster].values,
-                                        nobs=totals[cluster],
-                                        alpha=args.alpha_ci, method="wilson")
-            low[cluster], high[cluster] = lo * 100.0, hi * 100.0
-        else:
-            low[cluster], high[cluster] = 0.0, 0.0
-
-    # one chi-square test per domain: that domain against the remaining ones
-    pvals = []
     for label in DOMAIN_LABELS:
-        inside = counts.loc[label, clusters].values
-        outside = (counts.sum(axis=0) - counts.loc[label, clusters]).values
-        pvals.append(chi2_contingency(np.vstack([inside, outside]))[1])
+        n = int(totals[label])
+        for cluster in clusters:
+            if n == 0:
+                low.loc[label, cluster] = high.loc[label, cluster] = 0.0
+            else:
+                lo, hi = proportion_confint(count=int(counts.loc[label, cluster]),
+                                            nobs=n, alpha=args.alpha_ci,
+                                            method="wilson")
+                low.loc[label, cluster] = lo * 100.0
+                high.loc[label, cluster] = hi * 100.0
+    cluster_totals = counts.sum(axis=0)
+    pvals, methods = [], []
+    for label in DOMAIN_LABELS:
+        inside = counts.loc[label, clusters].astype(int).values
+        outside = (cluster_totals - counts.loc[label, clusters]).astype(int).values
+        table_2x2 = np.vstack([inside, outside])
+        _, p, _, expected = chi2_contingency(table_2x2)
+        if (expected < 5).any():
+            _, p = fisher_exact(table_2x2)
+            methods.append("fisher")
+        else:
+            methods.append("chi2")
+        pvals.append(p)
     pvals = np.asarray(pvals)
 
     table = pd.DataFrame({"domain": DOMAIN_LABELS,

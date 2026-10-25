@@ -1,9 +1,6 @@
 import argparse
 import os
-import time
-
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -40,9 +37,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-    start_cpu_time = time.process_time()
-    start_time = time.perf_counter()
-
     alpha_z = args.alphaZ
     droot = data_root(args.data_root)
     oroot = out_root(args.out_root)
@@ -96,7 +90,7 @@ def main():
     loss_all, KLz_all, CExz_all = [], [], []
 
     for epoch in range(n_epochs):
-
+        batch_loss, batch_KLz, batch_CExz = [], [], []
         for arrays, labels in data_loader:
             arrays = arrays.float().to(device)
 
@@ -112,9 +106,7 @@ def main():
             x = encoder_2(x)
             x = encoder_3(x)
             x_mu, x_std = encoder_4(x)
-
-            avoid_inf = torch.ones_like(x_std) * 1.0e-9
-            q_z = dist.Normal(x_mu, x_std + avoid_inf, validate_args=False)
+            q_z = dist.Normal(x_mu, x_std + EPS_STD, validate_args=False)
             z = q_z.rsample()
             x_hat = decoder(z)
 
@@ -133,18 +125,22 @@ def main():
             loss_all.append(loss.item())
             KLz_all.append(KLz.item() * alpha_z)
             CExz_all.append(CExz.item())
+            batch_loss.append(loss.item())
+            batch_KLz.append(KLz.item())
+            batch_CExz.append(CExz.item())
+        loss_epoch.append(float(np.mean(batch_loss)))
+        KLz_epoch.append(float(np.mean(batch_KLz)))
+        CExz_epoch.append(float(np.mean(batch_CExz)))
 
-        loss_epoch.append(loss.item())
-        KLz_epoch.append(KLz.item())
-        CExz_epoch.append(CExz.item())
+        if epoch % args.save_every == 0:
+            save_checkpoint(epoch)
 
     loss_path = reset_dir(os.path.join(save_path, "loss"))
     for name, values in [("loss_epoch", loss_epoch), ("KLz_epoch", KLz_epoch),
                          ("CExz_epoch", CExz_epoch), ("loss_all", loss_all),
                          ("KLz_all", KLz_all), ("CExz_all", CExz_all)]:
         np.save(os.path.join(loss_path, name), np.array(values))
-    if epoch % SAVE_EVERY == 0:
-            save_checkpoint(epoch)
+
 
 if __name__ == "__main__":
     main()
